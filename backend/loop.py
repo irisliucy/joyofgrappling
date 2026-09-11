@@ -22,6 +22,7 @@ def _run_loop(query_id: str, cfg: ReapConfig):
     store.update_query_status(query_id, "running", "iteration 1")
 
     processed_ids = set()
+    searched_queries = set()  # avoid re-spending quota on an exact repeat within this run
     next_query = cfg.query
     iteration = 1
     prior_edge_count = 0
@@ -30,13 +31,19 @@ def _run_loop(query_id: str, cfg: ReapConfig):
     while True:
         store.log(query_id, iteration, "expand_query", "start")
         expanded = query_expansion.expand_query(next_query, cfg.target_player)
-        store.log(query_id, iteration, "expand_query", "done", {"query_count": len(expanded)})
+        new_queries = [q for q in expanded if q not in searched_queries]
+        skipped = len(expanded) - len(new_queries)
+        store.log(
+            query_id, iteration, "expand_query", "done",
+            {"query_count": len(expanded), "already_searched_skipped": skipped},
+        )
 
         # 2. SEARCH
         store.update_query_status(query_id, "running", f"iteration {iteration}: searching")
         all_videos = []
         seen_ids = set()
-        for q in expanded:
+        for q in new_queries:
+            searched_queries.add(q)
             try:
                 results = search(q, source="youtube", max_results=5)
             except SourceUnavailable as e:

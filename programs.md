@@ -467,8 +467,22 @@ search strings. Run all of them. Deduplicate results by `video_id`.
    - `"no gi grappling"`
    - `"competition highlight"`
    - `"breakdown"`
-4. **Never search more than 12 expanded queries per loop iteration.**
-   Prioritize: player name + position > position alone > player name alone.
+4. **Never search more than `MAX_EXPANDED_QUERIES_PER_ITERATION` expanded
+   queries per loop iteration** (4 as of 2026-09-11, down from an initial
+   12). Prioritize: player name + position > position alone > player name
+   alone.
+
+   This cap is a direct lever on YouTube quota cost: `search.list` costs
+   100 of the default 10,000 daily quota units per call (~100 searches/day
+   total). At 12/iteration, one full 8-iteration run could burn ~9,600
+   units -- nearly the entire daily budget on a single query. At
+   4/iteration it's ~3,200 for a full run. The original design multiplied
+   every base query by all 4 context suffixes; that added little relevance
+   for 3-4x the search cost, so suffixing is now applied to at most one
+   query per call instead of every combination. The loop also tracks every
+   query string already searched within a run and skips exact repeats
+   (e.g. if `REFINE QUERY` picks a term that regenerates an
+   already-searched expansion).
 
 ---
 

@@ -30,7 +30,11 @@ DEFAULT_LANGUAGE = "en"
 WINDOW_WORD_COUNT = 300
 OVERLAP_WORD_COUNT = 50
 
-MAX_EXPANDED_QUERIES_PER_ITERATION = 12
+# Each search.list call costs 100 of YouTube's 10,000/day quota units, so
+# this cap directly bounds daily search cost: 4/iteration x 8 iterations
+# (default max_iterations) = 32 searches = 3,200 units per full run, vs.
+# the prior 12/iteration cap which could burn ~9,600 units on one run.
+MAX_EXPANDED_QUERIES_PER_ITERATION = 4
 MAX_SEARCH_POOL_PER_QUERY = 10
 
 # --- Authority Table (see programs.md: Authority Table) --------------------
