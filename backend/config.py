@@ -8,6 +8,14 @@ load_dotenv()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 
+# Webshare residential proxy for caption fetching (see backend/transcript.py).
+# YouTube blocks/rate-limits its unofficial transcript endpoint from
+# datacenter IPs (Render, AWS, GCP, ...); routing through a residential
+# proxy avoids that. Optional -- if unset, transcript fetches go direct
+# (fine for local/residential-IP development, not for most cloud hosts).
+WEBSHARE_PROXY_USERNAME = os.environ.get("WEBSHARE_PROXY_USERNAME", "")
+WEBSHARE_PROXY_PASSWORD = os.environ.get("WEBSHARE_PROXY_PASSWORD", "")
+
 EXTRACTION_MODEL = "claude-sonnet-5"
 
 ROOT_DIR = Path(__file__).resolve().parent.parent

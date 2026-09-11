@@ -11,6 +11,10 @@ services:
         sync: false
       - key: YOUTUBE_API_KEY
         sync: false
+      - key: WEBSHARE_PROXY_USERNAME
+        sync: false
+      - key: WEBSHARE_PROXY_PASSWORD
+        sync: false
     disk:
       name: joyofgrappling-data
       mountPath: /data
