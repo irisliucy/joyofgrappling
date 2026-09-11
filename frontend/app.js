@@ -57,7 +57,7 @@ form.addEventListener("submit", async (e) => {
   const player = document.getElementById("player-input").value.trim();
   if (!query) return;
 
-  if (!API_BASE) {
+  if (API_BASE === null) {
     setStatus("No live backend reachable from this page — this is a static export. Run the local server to start new research.");
     return;
   }
