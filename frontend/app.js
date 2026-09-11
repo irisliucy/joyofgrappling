@@ -232,6 +232,34 @@ function clearGraphHighlight() {
   });
 }
 
+// Clicking an insight "pins" its highlight (so it survives hovering over
+// other insights afterward) and zooms the graph viewport to just its nodes.
+// Clicking the same insight again un-pins and zooms back out.
+let pinnedInsightIdx = null;
+
+function selectInsightOnGraph(idx, insight) {
+  document.querySelectorAll("#insights-list li.insight-selected").forEach((li) => li.classList.remove("insight-selected"));
+
+  if (pinnedInsightIdx === idx) {
+    pinnedInsightIdx = null;
+    clearGraphHighlight();
+    if (network) network.fit({ animation: { duration: 500, easingFunction: "easeInOutQuad" } });
+    return;
+  }
+
+  pinnedInsightIdx = idx;
+  const li = document.getElementById(`insight-${idx}`);
+  if (li) li.classList.add("insight-selected");
+  highlightGraphForInsight(insight);
+
+  if (network) {
+    const nodeIds = [insight.from_node_id, insight.to_node_id].filter(Boolean);
+    if (nodeIds.length) {
+      network.fit({ nodes: nodeIds, animation: { duration: 500, easingFunction: "easeInOutQuad" } });
+    }
+  }
+}
+
 function renderInsights(insights) {
   const list = document.getElementById("insights-list");
   list.innerHTML = "";
@@ -255,7 +283,17 @@ function renderInsights(insights) {
     const li = document.createElement("li");
     li.id = `insight-${idx}`;
     li.addEventListener("mouseenter", () => highlightGraphForInsight(insight));
-    li.addEventListener("mouseleave", clearGraphHighlight);
+    li.addEventListener("mouseleave", () => {
+      if (pinnedInsightIdx !== null) {
+        highlightGraphForInsight(currentInsights[pinnedInsightIdx]);
+      } else {
+        clearGraphHighlight();
+      }
+    });
+    li.addEventListener("click", (e) => {
+      if (e.target.closest(".watch-btn")) return; // let the watch button handle its own click
+      selectInsightOnGraph(idx, insight);
+    });
 
     const watchButtons = (insight.sources || [])
       .map(
@@ -332,6 +370,8 @@ function onGraphClick(params) {
   } else if (params.nodes.length > 0) {
     indices = insightIdxsByNodeId.get(params.nodes[0]) || [];
   } else {
+    pinnedInsightIdx = null;
+    clearGraphHighlight();
     return; // clicked empty canvas -- just clear selection
   }
 

@@ -104,6 +104,9 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: 
   scroll-margin: 16px;
 }
 
+#insights-list li { cursor: pointer; }
+#insights-list li .watch-btn { cursor: pointer; }
+
 #insights-list li.insight-selected {
   background: rgba(255, 213, 74, 0.12);
   outline: 1px solid var(--accent);
