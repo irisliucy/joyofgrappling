@@ -216,3 +216,42 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; }
 }
+
+/* Legal pages (privacy.html, terms.html) */
+
+.legal-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.legal-page .back-link {
+  display: inline-block;
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+.legal-page .back-link:hover { color: var(--accent); }
+
+.legal-page h2 {
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 16px;
+  margin: 28px 0 8px;
+}
+.legal-page h2:first-of-type { margin-top: 0; }
+
+.legal-page p {
+  color: var(--muted);
+  line-height: 1.7;
+  font-size: 14px;
+  margin: 0 0 14px;
+}
+
+.legal-page a { color: var(--accent); text-decoration: none; }
+.legal-page a:hover { text-decoration: underline; }
+
+footer a { color: var(--muted); text-decoration: none; }
+footer a:hover { color: var(--accent); }
