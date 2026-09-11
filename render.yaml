@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: joyofgrappling
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+    disk:
+      name: joyofgrappling-data
+      mountPath: /data
+      sizeGB: 1
