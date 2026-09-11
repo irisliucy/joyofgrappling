@@ -56,6 +56,22 @@ def export_query(query_id: str):
     return {"exported_to": str(path)}
 
 
+@app.get("/api/debug/logs/{query_id}")
+def get_debug_logs(query_id: str):
+    # Temporary: lets us inspect run_logs on a deployed instance without
+    # direct DB/SSH access. Remove once no longer needed.
+    with store.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT iteration, step, status, details_json, created_at FROM run_logs WHERE query_id = ? ORDER BY rowid",
+            (query_id,),
+        ).fetchall()
+        videos = conn.execute("SELECT * FROM videos WHERE query_id = ?", (query_id,)).fetchall()
+    return {
+        "logs": [dict(r) for r in rows],
+        "videos": [dict(v) for v in videos],
+    }
+
+
 # Serves frontend/ at the site root, same-origin with the /api routes above
 # (mounted last so it doesn't shadow them).
 app.mount("/", StaticFiles(directory=str(config.ROOT_DIR / "frontend"), html=True), name="frontend")
