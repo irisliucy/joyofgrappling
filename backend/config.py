@@ -8,13 +8,23 @@ load_dotenv()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 
-# Webshare residential proxy for caption fetching (see backend/transcript.py).
-# YouTube blocks/rate-limits its unofficial transcript endpoint from
-# datacenter IPs (Render, AWS, GCP, ...); routing through a residential
-# proxy avoids that. Optional -- if unset, transcript fetches go direct
-# (fine for local/residential-IP development, not for most cloud hosts).
+# Proxy for caption fetching (see backend/transcript.py). YouTube blocks/
+# rate-limits its unofficial transcript endpoint from datacenter IPs
+# (Render, AWS, GCP, ...); routing through a residential proxy avoids
+# that. Both are optional and independent -- if neither is set, transcript
+# fetches go direct (fine for local/residential-IP development, not for
+# most cloud hosts). Prefer whichever proxy provider you already have:
+#
+# - WEBSHARE_PROXY_USERNAME/PASSWORD: Webshare's residential proxy product
+#   specifically (youtube-transcript-api has built-in support for it).
+# - PROXY_HTTP_URL/PROXY_HTTPS_URL: any other provider (Bright Data,
+#   Smartproxy, IPRoyal, Oxylabs, a self-hosted proxy, ...) as a plain
+#   "http://user:pass@host:port" URL. Takes effect only if the Webshare
+#   vars above are unset.
 WEBSHARE_PROXY_USERNAME = os.environ.get("WEBSHARE_PROXY_USERNAME", "")
 WEBSHARE_PROXY_PASSWORD = os.environ.get("WEBSHARE_PROXY_PASSWORD", "")
+PROXY_HTTP_URL = os.environ.get("PROXY_HTTP_URL", "")
+PROXY_HTTPS_URL = os.environ.get("PROXY_HTTPS_URL", "")
 
 EXTRACTION_MODEL = "claude-sonnet-5"
 
