@@ -16,16 +16,16 @@ const CATEGORY_COLORS = {
 // Edge color encodes stage (entry/transition/result -- what the user asked
 // to visually split the graph by); dash/width encodes confidence instead.
 const STAGE_COLORS = {
-  entry: "#4f8cff",
-  transition: "#f5a623",
-  result: "#2ecc71",
+  entry: "#ffffff",
+  transition: "#ff3b3b",
+  result: "#a80000",
 };
 const STAGE_LABELS = {
   entry: "Entry",
   transition: "Transition (solving a problem)",
   result: "Result (submission / sweep / pass → control)",
 };
-const CONTESTED_COLOR = "#ff5c5c";
+const CONTESTED_COLOR = "#00e5ff"; // distinct from the white/red stage palette
 
 const CONFIDENCE_LINE = {
   established: { width: 4, dashes: false },
@@ -182,13 +182,31 @@ function renderStageFilter() {
   });
 }
 
+const FILTERED_OUT_OPACITY = 0.06;
+
 function applyStageFilter() {
-  if (!edgesDataSet) return;
+  if (!edgesDataSet || !nodesDataSet) return;
   const checked = new Set(
     Array.from(document.querySelectorAll("#stage-filter input:checked")).map((cb) => cb.dataset.stage)
   );
+
+  const activeNodeIds = new Set();
   edgesDataSet.forEach((edge) => {
-    edgesDataSet.update({ id: edge.id, hidden: !checked.has(edge.stage) });
+    const isActive = checked.has(edge.stage);
+    const original = edgeOriginalStyle.get(edge.id);
+    edgesDataSet.update({
+      id: edge.id,
+      color: { color: original.color.color, opacity: isActive ? 1 : FILTERED_OUT_OPACITY },
+      width: isActive ? original.width : 1,
+    });
+    if (isActive) {
+      activeNodeIds.add(edge.from);
+      activeNodeIds.add(edge.to);
+    }
+  });
+
+  nodesDataSet.forEach((node) => {
+    nodesDataSet.update({ id: node.id, opacity: activeNodeIds.has(node.id) ? 1 : FILTERED_OUT_OPACITY });
   });
 }
 
