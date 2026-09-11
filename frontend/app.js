@@ -182,7 +182,7 @@ function renderStageFilter() {
   });
 }
 
-const FILTERED_OUT_OPACITY = 0.06;
+const FILTERED_OUT_OPACITY = 0; // fully invisible, not just faint
 
 function applyStageFilter() {
   if (!edgesDataSet || !nodesDataSet) return;
