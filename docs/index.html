@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Joy of Grappling — Reap</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Joy of Grappling</h1>
+    <p class="subtitle">Reap: search a position or style → auto-build a credibility-scored technique graph.</p>
+  </header>
+
+  <form id="research-form">
+    <input id="query-input" type="text" placeholder="e.g. K guard" />
+    <input id="player-input" type="text" placeholder="target player (optional), e.g. Mateusz Szczeciński" />
+    <button type="submit">Research</button>
+  </form>
+
+  <div id="status" class="status" hidden></div>
+
+  <main id="results" hidden>
+    <section class="graph-panel">
+      <h2>Technique graph</h2>
+      <div class="legend" id="legend"></div>
+      <div id="mindmap"></div>
+    </section>
+    <section class="insights-panel">
+      <h2>Key insights</h2>
+      <ul id="insights-list"></ul>
+      <h2>Contested</h2>
+      <ul id="contested-list"></ul>
+      <h2>Sources</h2>
+      <ul id="sources-list"></ul>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
