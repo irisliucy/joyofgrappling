@@ -79,12 +79,20 @@ function setStatus(text) {
 
 async function pollJob(queryId) {
   const resp = await fetch(`${API_BASE}/api/jobs/${queryId}`);
+  if (!resp.ok) {
+    setStatus(`No research job found with id "${queryId}" on this server.`);
+    return;
+  }
   const job = await resp.json();
   setStatus(`[${job.status}] ${job.progress || ""}`);
 
   if (job.status === "done" || job.status === "error") {
     if (job.has_output) {
       const outResp = await fetch(`${API_BASE}/api/output/${queryId}`);
+      if (!outResp.ok) {
+        setStatus(`Job finished but its output couldn't be loaded (HTTP ${outResp.status}).`);
+        return;
+      }
       renderOutput(await outResp.json());
     }
     return;
@@ -435,14 +443,22 @@ const params = new URLSearchParams(window.location.search);
 const exportId = params.get("export");
 if (exportId) {
   fetch(`./exports/${exportId}/output.json`)
-    .then((r) => r.json())
-    .then(renderOutput);
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(renderOutput)
+    .catch((err) => setStatus(`Couldn't load exported result "${exportId}": ${err.message}`));
 }
 
 // Live mode: ?job=<id> loads an existing result straight from the running API.
 const jobId = params.get("job");
 if (jobId && API_BASE !== null) {
   fetch(`${API_BASE}/api/output/${jobId}`)
-    .then((r) => r.json())
-    .then(renderOutput);
+    .then((r) => {
+      if (!r.ok) throw new Error(r.status === 404 ? "no job with that id exists on this server" : `HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(renderOutput)
+    .catch((err) => setStatus(`Couldn't load job "${jobId}": ${err.message}`));
 }
