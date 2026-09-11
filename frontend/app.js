@@ -51,6 +51,8 @@ let currentInsights = [];
 let insightIdxByEdgeId = new Map();
 let insightIdxsByNodeId = new Map(); // node id -> array of insight indices
 
+const ORIGINAL_TITLE = document.title;
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const query = document.getElementById("query-input").value.trim();
@@ -62,6 +64,11 @@ form.addEventListener("submit", async (e) => {
     return;
   }
 
+  if (window.Notification && Notification.permission === "default") {
+    Notification.requestPermission(); // must be triggered by a user gesture, so ask right on submit
+  }
+
+  document.title = ORIGINAL_TITLE;
   setStatus(`Starting research on "${query}"...`);
   const resp = await fetch(`${API_BASE}/api/research`, {
     method: "POST",
@@ -69,12 +76,27 @@ form.addEventListener("submit", async (e) => {
     body: JSON.stringify({ query, target_player: player || null }),
   });
   const { query_id } = await resp.json();
+
+  // Put the job id in the URL so a page refresh reconnects to this run
+  // instead of losing it entirely.
+  history.pushState({}, "", `?job=${query_id}`);
   pollJob(query_id);
 });
 
 function setStatus(text) {
   statusEl.hidden = false;
   statusEl.textContent = text;
+}
+
+function notifyJobFinished(status, queryText) {
+  const label = status === "error" ? "Error" : "Done";
+  document.title = `${status === "error" ? "⚠️" : "✅"} ${label} — ${ORIGINAL_TITLE}`;
+
+  if (window.Notification && Notification.permission === "granted") {
+    new Notification(`Joy of Grappling: ${label}`, {
+      body: status === "error" ? `Research on "${queryText}" hit an error.` : `Research on "${queryText}" is ready to view.`,
+    });
+  }
 }
 
 async function pollJob(queryId) {
@@ -87,6 +109,7 @@ async function pollJob(queryId) {
   setStatus(`[${job.status}] ${job.progress || ""}`);
 
   if (job.status === "done" || job.status === "error") {
+    notifyJobFinished(job.status, job.query_text);
     if (job.has_output) {
       const outResp = await fetch(`${API_BASE}/api/output/${queryId}`);
       if (!outResp.ok) {
@@ -451,14 +474,34 @@ if (exportId) {
     .catch((err) => setStatus(`Couldn't load exported result "${exportId}": ${err.message}`));
 }
 
-// Live mode: ?job=<id> loads an existing result straight from the running API.
+// Live mode: ?job=<id> resumes an existing job -- whether it's still
+// running (keep polling, e.g. after a page refresh mid-run) or already
+// finished (load its output directly).
 const jobId = params.get("job");
 if (jobId && API_BASE !== null) {
-  fetch(`${API_BASE}/api/output/${jobId}`)
-    .then((r) => {
-      if (!r.ok) throw new Error(r.status === 404 ? "no job with that id exists on this server" : `HTTP ${r.status}`);
-      return r.json();
-    })
-    .then(renderOutput)
-    .catch((err) => setStatus(`Couldn't load job "${jobId}": ${err.message}`));
+  resumeJob(jobId);
+}
+
+async function resumeJob(queryId) {
+  const resp = await fetch(`${API_BASE}/api/jobs/${queryId}`);
+  if (!resp.ok) {
+    setStatus(`Couldn't load job "${queryId}": no job with that id exists on this server.`);
+    return;
+  }
+  const job = await resp.json();
+  if (job.status === "done" || job.status === "error") {
+    if (job.has_output) {
+      const outResp = await fetch(`${API_BASE}/api/output/${queryId}`);
+      if (!outResp.ok) {
+        setStatus(`Job finished but its output couldn't be loaded (HTTP ${outResp.status}).`);
+        return;
+      }
+      renderOutput(await outResp.json());
+    } else {
+      setStatus(`[${job.status}] ${job.progress || ""}`);
+    }
+    return;
+  }
+  // still running -- resume polling right where a refresh interrupted it
+  pollJob(queryId);
 }
