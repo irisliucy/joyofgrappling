@@ -70,7 +70,7 @@ def debug_caption(video_id: str):
     )
     try:
         fetched = transcript._build_api().fetch(video_id)
-        return {"proxy_configured": proxy_configured, "success": True, "segment_count": len(fetched.segments)}
+        return {"proxy_configured": proxy_configured, "success": True, "segment_count": len(list(fetched))}
     except Exception as e:
         return {"proxy_configured": proxy_configured, "success": False, "error_type": type(e).__name__, "error": str(e)}
 
