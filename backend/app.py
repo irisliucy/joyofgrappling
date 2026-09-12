@@ -56,6 +56,25 @@ def export_query(query_id: str):
     return {"exported_to": str(path)}
 
 
+@app.get("/api/debug/caption/{video_id}")
+def debug_caption(video_id: str):
+    # Temporary: surfaces the real exception from a caption fetch attempt,
+    # since transcript.fetch_captions() normally swallows all errors.
+    # Also reports whether a proxy is configured, without leaking secrets.
+    from . import config, transcript
+
+    proxy_configured = bool(
+        (config.WEBSHARE_PROXY_USERNAME and config.WEBSHARE_PROXY_PASSWORD)
+        or config.PROXY_HTTP_URL
+        or config.PROXY_HTTPS_URL
+    )
+    try:
+        fetched = transcript._build_api().fetch(video_id)
+        return {"proxy_configured": proxy_configured, "success": True, "segment_count": len(fetched.segments)}
+    except Exception as e:
+        return {"proxy_configured": proxy_configured, "success": False, "error_type": type(e).__name__, "error": str(e)}
+
+
 @app.get("/api/debug/logs/{query_id}")
 def get_debug_logs(query_id: str):
     # Temporary: lets us inspect run_logs on a deployed instance without
