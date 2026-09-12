@@ -1,16 +1,22 @@
 import json
+from datetime import datetime
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import config, export_static, loop, store
 from .schemas import ReapConfig
 
-app = FastAPI(title="Joy of Grappling — Reap")
+
+class FeedbackRequest(BaseModel):
+    action: str  # "up" | "down"
+
+app = FastAPI(title="Joy of Grappling")
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,23 +40,56 @@ def get_job(query_id: str):
     query = store.get_query(query_id)
     if query is None:
         raise HTTPException(404, "unknown query_id")
+
+    last_activity = store.get_last_activity(query_id)
+    seconds_since_activity = None
+    if last_activity:
+        last_activity_dt = datetime.strptime(last_activity, "%Y-%m-%d %H:%M:%S")
+        seconds_since_activity = (datetime.utcnow() - last_activity_dt).total_seconds()
+
     return {
         "id": query["id"],
         "query_text": query["query_text"],
         "status": query["status"],
         "progress": query["progress"],
-        "has_output": query["output_json"] is not None,
+        "has_output": store.has_any_edges(query_id),  # true as soon as anything exists, not just at completion
+        "seconds_since_activity": seconds_since_activity,
     }
 
 
 @app.get("/api/output/{query_id}")
 def get_output(query_id: str):
+    # Always built live from whatever edges exist right now -- this is what
+    # lets the frontend show a partial graph seconds into a run instead of
+    # waiting for the whole thing (which can take 30-90+ minutes) to finish.
     query = store.get_query(query_id)
     if query is None:
         raise HTTPException(404, "unknown query_id")
-    if not query["output_json"]:
-        raise HTTPException(409, "output not ready yet")
-    return json.loads(query["output_json"])
+    output = loop.build_output(query_id, query["query_text"])
+    return json.loads(output.model_dump_json(by_alias=True))
+
+
+@app.post("/api/feedback/{query_id}/{edge_id}")
+def submit_feedback(query_id: str, edge_id: str, body: FeedbackRequest):
+    if body.action not in ("up", "down"):
+        raise HTTPException(400, "action must be 'up' or 'down'")
+    if store.get_query(query_id) is None:
+        raise HTTPException(404, "unknown query_id")
+    store.record_feedback(query_id, edge_id, body.action)
+    return {"ok": True}
+
+
+@app.delete("/api/edges/{query_id}/{edge_id}")
+def delete_edge(query_id: str, edge_id: str):
+    if store.get_query(query_id) is None:
+        raise HTTPException(404, "unknown query_id")
+    deleted = store.delete_edge(query_id, edge_id)
+    if not deleted:
+        raise HTTPException(404, "unknown edge_id for this query")
+    return {
+        "ok": True,
+        "has_output": store.has_any_edges(query_id),
+    }
 
 
 @app.post("/api/export/{query_id}")

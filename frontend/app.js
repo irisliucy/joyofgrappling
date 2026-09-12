@@ -50,8 +50,29 @@ let edgeOriginalStyle = new Map();
 let currentInsights = [];
 let insightIdxByEdgeId = new Map();
 let insightIdxsByNodeId = new Map(); // node id -> array of insight indices
+let lastRenderedEdgeCount = -1; // avoids re-rendering the graph when polling finds no new edges
+let currentQueryId = null; // needed by the feedback (👍/👎/✕) buttons on each insight
 
 const ORIGINAL_TITLE = document.title;
+
+// A job with no new run_log entry for this long is treated as orphaned
+// (e.g. the backend process restarted mid-run and never marked it
+// done/error) rather than genuinely still working.
+const STALE_AFTER_SECONDS = 180;
+
+const statusDot = document.getElementById("status-dot");
+const statusDotLabel = document.getElementById("status-dot-label");
+
+function setStatusDot(state, label) {
+  statusDot.className = `status-dot ${state}`;
+  statusDotLabel.textContent = label;
+}
+
+if (API_BASE === null) {
+  setStatusDot("blocked", "No backend");
+} else {
+  setStatusDot("ready", "Ready");
+}
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -61,6 +82,7 @@ form.addEventListener("submit", async (e) => {
 
   if (API_BASE === null) {
     setStatus("No live backend reachable from this page — this is a static export. Run the local server to start new research.");
+    setStatusDot("blocked", "No backend");
     return;
   }
 
@@ -70,6 +92,7 @@ form.addEventListener("submit", async (e) => {
 
   document.title = ORIGINAL_TITLE;
   setStatus(`Starting research on "${query}"...`);
+  setStatusDot("running", "Starting");
   const resp = await fetch(`${API_BASE}/api/research`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -88,6 +111,12 @@ function setStatus(text) {
   statusEl.textContent = text;
 }
 
+function formatStaleness(seconds) {
+  if (seconds == null) return "";
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  return `${Math.round(seconds / 60)}m ago`;
+}
+
 function notifyJobFinished(status, queryText) {
   const label = status === "error" ? "Error" : "Done";
   document.title = `${status === "error" ? "⚠️" : "✅"} ${label} — ${ORIGINAL_TITLE}`;
@@ -100,15 +129,18 @@ function notifyJobFinished(status, queryText) {
 }
 
 async function pollJob(queryId) {
+  currentQueryId = queryId;
   const resp = await fetch(`${API_BASE}/api/jobs/${queryId}`);
   if (!resp.ok) {
     setStatus(`No research job found with id "${queryId}" on this server.`);
+    setStatusDot("blocked", "Not found");
     return;
   }
   const job = await resp.json();
-  setStatus(`[${job.status}] ${job.progress || ""}`);
 
   if (job.status === "done" || job.status === "error") {
+    setStatus(`[${job.status}] ${job.progress || ""}`);
+    setStatusDot(job.status === "error" ? "error" : "ready", job.status === "error" ? "Error" : "Ready");
     notifyJobFinished(job.status, job.query_text);
     if (job.has_output) {
       const outResp = await fetch(`${API_BASE}/api/output/${queryId}`);
@@ -120,6 +152,39 @@ async function pollJob(queryId) {
     }
     return;
   }
+
+  const stale = job.seconds_since_activity != null && job.seconds_since_activity > STALE_AFTER_SECONDS;
+  const agoText = formatStaleness(job.seconds_since_activity);
+
+  // Live/incremental results: the run can take many minutes end-to-end,
+  // but store_insight() commits each extracted edge immediately, so we can
+  // show a growing graph as soon as anything exists instead of waiting for
+  // completion. Only re-render when the edge count actually changed, so
+  // the graph doesn't reset zoom/selection on every 2s poll for no reason.
+  let progressCounts = "";
+  if (job.has_output) {
+    const outResp = await fetch(`${API_BASE}/api/output/${queryId}`);
+    if (outResp.ok) {
+      const output = await outResp.json();
+      progressCounts = ` — ${output.graph.nodes.length} nodes, ${output.graph.edges.length} edges so far`;
+      if (output.graph.edges.length !== lastRenderedEdgeCount) {
+        lastRenderedEdgeCount = output.graph.edges.length;
+        renderOutput(output);
+      }
+    }
+  }
+
+  if (stale) {
+    setStatus(
+      `[${job.status}] ${job.progress || ""}${progressCounts} — last activity ${agoText}, this run may be ` +
+        `stuck (possibly an orphaned job from a server restart). Consider starting a new one.`
+    );
+    setStatusDot("blocked", "Possibly stalled");
+  } else {
+    setStatus(`[${job.status}] ${job.progress || ""}${progressCounts}${agoText ? ` (updated ${agoText})` : ""}`);
+    setStatusDot("running", "In progress");
+  }
+
   setTimeout(() => pollJob(queryId), 2000);
 }
 
@@ -353,11 +418,17 @@ function renderInsights(insights) {
       )
       .join(" ");
 
+    const edgeId = insight.graph_edge_id || "";
     li.innerHTML = `
       <span class="badge badge-${insight.confidence_label}">${insight.confidence_label}</span>
       ${insight.text}
       <span class="muted"> — ${insight.source_count} source${insight.source_count === 1 ? "" : "s"}</span>
-      <div class="watch-row">${watchButtons}</div>
+      <div class="watch-row">
+        ${watchButtons}
+        <button class="feedback-btn feedback-up" data-edge="${edgeId}" title="More like this">👍</button>
+        <button class="feedback-btn feedback-down" data-edge="${edgeId}" title="Less like this">👎</button>
+        <button class="feedback-btn feedback-delete" data-edge="${edgeId}" title="Delete permanently">✕</button>
+      </div>
       <div class="player-slot" id="player-${idx}"></div>
     `;
     list.appendChild(li);
@@ -371,6 +442,58 @@ function renderInsights(insights) {
       togglePlayer(`player-${insightIdx}`, source);
     });
   });
+
+  list.querySelectorAll(".feedback-up, .feedback-down").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const action = btn.classList.contains("feedback-up") ? "up" : "down";
+      submitFeedback(btn.dataset.edge, action, btn);
+    });
+  });
+
+  list.querySelectorAll(".feedback-delete").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteInsightEdge(btn.dataset.edge, btn);
+    });
+  });
+}
+
+async function submitFeedback(edgeId, action, btn) {
+  if (!currentQueryId || !edgeId) return;
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API_BASE}/api/feedback/${currentQueryId}/${edgeId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    if (resp.ok) {
+      btn.classList.add("feedback-sent");
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteInsightEdge(edgeId, btn) {
+  if (!currentQueryId || !edgeId) return;
+  if (!confirm("Permanently delete this technique from the graph? This can't be undone.")) return;
+
+  btn.disabled = true;
+  const resp = await fetch(`${API_BASE}/api/edges/${currentQueryId}/${edgeId}`, { method: "DELETE" });
+  if (!resp.ok) {
+    btn.disabled = false;
+    return;
+  }
+  // Re-fetch and re-render immediately so the deleted node/edge disappears
+  // from the graph right away, not on the next poll tick.
+  const outResp = await fetch(`${API_BASE}/api/output/${currentQueryId}`);
+  if (outResp.ok) {
+    const output = await outResp.json();
+    lastRenderedEdgeCount = output.graph.edges.length;
+    renderOutput(output);
+  }
 }
 
 function formatTimestamp(seconds) {
@@ -483,13 +606,17 @@ if (jobId && API_BASE !== null) {
 }
 
 async function resumeJob(queryId) {
+  currentQueryId = queryId;
+  setStatusDot("blocked", "Checking…"); // neutral state while we find out what this job actually is
   const resp = await fetch(`${API_BASE}/api/jobs/${queryId}`);
   if (!resp.ok) {
     setStatus(`Couldn't load job "${queryId}": no job with that id exists on this server.`);
+    setStatusDot("blocked", "Not found");
     return;
   }
   const job = await resp.json();
   if (job.status === "done" || job.status === "error") {
+    setStatusDot(job.status === "error" ? "error" : "ready", job.status === "error" ? "Error" : "Ready");
     if (job.has_output) {
       const outResp = await fetch(`${API_BASE}/api/output/${queryId}`);
       if (!outResp.ok) {

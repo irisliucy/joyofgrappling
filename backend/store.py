@@ -79,6 +79,28 @@ CREATE TABLE IF NOT EXISTS review_queue (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    query_id TEXT NOT NULL,
+    edge_id TEXT NOT NULL,
+    action TEXT NOT NULL,          -- 'up' | 'down'
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS channel_reputation (
+    channel_id TEXT PRIMARY KEY,
+    score INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS topic_exclusions (
+    id TEXT PRIMARY KEY,
+    topic TEXT NOT NULL,           -- normalize_name(query_text) -- exact-match scope
+    video_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(topic, video_id)
+);
+
 CREATE TABLE IF NOT EXISTS run_logs (
     id TEXT PRIMARY KEY,
     query_id TEXT NOT NULL,
@@ -143,6 +165,19 @@ def update_query_status(query_id: str, status: str, progress: str = ""):
 def save_output(query_id: str, output_json: str):
     with get_conn() as conn:
         conn.execute("UPDATE queries SET output_json = ? WHERE id = ?", (output_json, query_id))
+
+
+def get_last_activity(query_id: str) -> str | None:
+    """Timestamp of the most recent run_log entry for this query, or None
+    if it never logged anything (e.g. crashed before the first step). Used
+    to tell a genuinely stalled/orphaned job (backend process died mid-run,
+    status frozen at "running" forever) from one that's actively working.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT MAX(created_at) as last_activity FROM run_logs WHERE query_id = ?", (query_id,)
+        ).fetchone()
+        return row["last_activity"] if row else None
 
 
 def get_query(query_id: str) -> dict | None:
@@ -353,3 +388,111 @@ def processed_video_ids(query_id: str) -> set[str]:
     with get_conn() as conn:
         rows = conn.execute("SELECT video_id FROM videos WHERE query_id = ?", (query_id,)).fetchall()
         return {r["video_id"] for r in rows}
+
+
+REPUTATION_WEIGHT = 0.05
+REPUTATION_CLAMP = 0.5
+
+
+def _channels_for_edge(conn, query_id: str, edge_id: str) -> list[str]:
+    rows = conn.execute(
+        """SELECT DISTINCT v.channel_id FROM edge_sources es
+           JOIN videos v ON v.video_id = es.video_id AND v.query_id = es.query_id
+           WHERE es.edge_id = ? AND es.query_id = ? AND v.channel_id IS NOT NULL AND v.channel_id != ''""",
+        (edge_id, query_id),
+    ).fetchall()
+    return [r["channel_id"] for r in rows]
+
+
+def record_feedback(query_id: str, edge_id: str, action: str) -> None:
+    """action: 'up' or 'down'. Nudges channel_reputation for every channel
+    behind this edge's sources -- see programs.md: Human Feedback Loop.
+    """
+    if action not in ("up", "down"):
+        raise ValueError(f"invalid feedback action: {action}")
+    delta = 1 if action == "up" else -1
+
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO feedback (id, query_id, edge_id, action) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4()), query_id, edge_id, action),
+        )
+        for channel_id in _channels_for_edge(conn, query_id, edge_id):
+            conn.execute(
+                """INSERT INTO channel_reputation (channel_id, score, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(channel_id) DO UPDATE SET
+                     score = score + excluded.score, updated_at = CURRENT_TIMESTAMP""",
+                (channel_id, delta),
+            )
+
+
+def get_channel_reputation(channel_id: str) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT score FROM channel_reputation WHERE channel_id = ?", (channel_id,)
+        ).fetchone()
+        return row["score"] if row else 0
+
+
+def get_reputation_factor(channel_id: str) -> float:
+    """1.0 = neutral. See programs.md: Channel Reputation for the formula."""
+    score = get_channel_reputation(channel_id)
+    adjustment = max(-REPUTATION_CLAMP, min(REPUTATION_CLAMP, score * REPUTATION_WEIGHT))
+    return 1.0 + adjustment
+
+
+def delete_edge(query_id: str, edge_id: str) -> bool:
+    """Permanently removes an edge and its sources from this query's graph,
+    and records a topic exclusion for each source video -- delete is a
+    topic-relevance learning signal, not just cleanup. See programs.md:
+    Human Feedback Loop / Topic Exclusion.
+    """
+    with get_conn() as conn:
+        edge_row = conn.execute("SELECT 1 FROM edges WHERE id = ? AND query_id = ?", (edge_id, query_id)).fetchone()
+        if edge_row is None:
+            return False
+
+        query_row = conn.execute("SELECT query_text FROM queries WHERE id = ?", (query_id,)).fetchone()
+        topic = _normalize(query_row["query_text"]) if query_row else None
+
+        video_ids = [
+            r["video_id"]
+            for r in conn.execute(
+                "SELECT DISTINCT video_id FROM edge_sources WHERE edge_id = ? AND query_id = ?", (edge_id, query_id)
+            ).fetchall()
+        ]
+
+        conn.execute("DELETE FROM edge_sources WHERE edge_id = ? AND query_id = ?", (edge_id, query_id))
+        conn.execute("DELETE FROM edges WHERE id = ? AND query_id = ?", (edge_id, query_id))
+
+        if topic:
+            for video_id in video_ids:
+                conn.execute(
+                    "INSERT OR IGNORE INTO topic_exclusions (id, topic, video_id) VALUES (?, ?, ?)",
+                    (str(uuid.uuid4()), topic, video_id),
+                )
+        return True
+
+
+def get_excluded_video_ids(topic: str) -> set[str]:
+    normalized_topic = _normalize(topic)
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT video_id FROM topic_exclusions WHERE topic = ?", (normalized_topic,)
+        ).fetchall()
+        return {r["video_id"] for r in rows}
+
+
+def has_any_edges(query_id: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute("SELECT 1 FROM edges WHERE query_id = ? LIMIT 1", (query_id,)).fetchone()
+        return row is not None
+
+
+def get_current_iteration(query_id: str) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT MAX(iteration) as max_iter FROM run_logs WHERE query_id = ?", (query_id,)
+        ).fetchone()
+        return row["max_iter"] or 0

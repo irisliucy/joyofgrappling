@@ -58,6 +58,20 @@ def _run_loop(query_id: str, cfg: ReapConfig):
             {"raw_result_count": len(all_videos), "deduped_count": len(seen_ids)},
         )
 
+        # Topic exclusion: skip videos a human previously deleted for this
+        # exact topic (see programs.md: Topic Exclusion) before spending
+        # any rank/extraction budget on them. Applies within this run too --
+        # a mid-run delete (against the live partial graph) excludes a
+        # video from later iterations of the same run.
+        excluded_ids = store.get_excluded_video_ids(cfg.query)
+        if excluded_ids:
+            before_count = len(all_videos)
+            all_videos = [v for v in all_videos if v.video_id not in excluded_ids]
+            store.log(
+                query_id, iteration, "topic_exclusion", "done",
+                {"excluded_count": before_count - len(all_videos)},
+            )
+
         # 3. RANK
         ranked = ranking.rank_videos(all_videos, cfg.query, cfg.top_videos_per_iteration)
         ranked = [(v, s) for v, s in ranked if v.video_id not in processed_ids]
@@ -180,7 +194,15 @@ def _should_continue(iteration, cfg: ReapConfig, edge_count, novelty_rate, low_n
     return True, "continuing"
 
 
-def _finalize(query_id: str, cfg: ReapConfig, iteration_count: int, videos_processed: int):
+def build_output(query_id: str, query_text: str) -> ReapOutput:
+    """Builds a ReapOutput from whatever edges exist in the DB right now --
+    callable at any point during a run, not just after it finishes. This is
+    what makes live/incremental results possible: store_insight() commits
+    each extraction immediately, so a run that's still on video 2 of 40
+    already has a partial-but-real graph to show.
+    """
+    iteration_count = store.get_current_iteration(query_id)
+    videos_processed = len(store.processed_video_ids(query_id))
     edges = store.all_edges(query_id)
 
     node_names = {}
@@ -250,8 +272,8 @@ def _finalize(query_id: str, cfg: ReapConfig, iteration_count: int, videos_proce
 
     sources_used = {s.video_id: s for edge in edges for s in edge.sources}.values()
 
-    output = ReapOutput(
-        query=cfg.query,
+    return ReapOutput(
+        query=query_text,
         generated_at=datetime.now(timezone.utc).isoformat(),
         iteration_count=iteration_count,
         videos_processed=videos_processed,
@@ -261,6 +283,9 @@ def _finalize(query_id: str, cfg: ReapConfig, iteration_count: int, videos_proce
         sources_used=list(sources_used),
     )
 
+
+def _finalize(query_id: str, cfg: ReapConfig, iteration_count: int, videos_processed: int):
+    output = build_output(query_id, cfg.query)
     store.save_output(query_id, output.model_dump_json(by_alias=True))
     store.update_query_status(query_id, "done", f"Processed {videos_processed} videos over {iteration_count} iterations.")
 

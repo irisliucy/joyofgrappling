@@ -3,7 +3,7 @@ source authority x relevance x recency, take the top N.
 """
 from datetime import datetime, timezone
 
-from . import authority, config
+from . import authority, config, store
 from .schemas import VideoMeta
 
 
@@ -30,7 +30,12 @@ def rank_videos(videos: list[VideoMeta], query: str, top_n: int) -> list[tuple[V
     for video in videos:
         source_score = authority.score_source(video.channel_id, video)
         weight = config.TIER_WEIGHTS.get(source_score.authority_tier, config.TIER_WEIGHTS[4])
-        score = weight * _relevance(video, query_terms) * _recency(video)
+        # Human feedback (thumbs up/down) accumulates per-channel across
+        # queries and nudges ranking here -- see programs.md: Channel
+        # Reputation. Static Authority Table tiers remain the primary
+        # signal; this is a secondary, earned adjustment on top.
+        reputation_factor = store.get_reputation_factor(video.channel_id)
+        score = weight * reputation_factor * _relevance(video, query_terms) * _recency(video)
         scored.append((video, score))
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored[:top_n]

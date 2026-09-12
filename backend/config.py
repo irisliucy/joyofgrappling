@@ -35,7 +35,7 @@ DOCS_DIR = ROOT_DIR / "docs"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- Reap runtime defaults (see programs.md: Runtime Configuration) -------
+# --- JoG runtime defaults (see programs.md: Runtime Configuration) -------
 
 DEFAULT_MAX_ITERATIONS = 8
 DEFAULT_TOP_VIDEOS_PER_ITERATION = 5

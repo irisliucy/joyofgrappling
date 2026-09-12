@@ -1,6 +1,6 @@
-# Joy of Grappling
+# Joy of Grappling (JoG)
 
-Reap: an autonomous BJJ research agent. Give it a position or style (and
+An autonomous BJJ research agent. Give it a position or style (and
 optionally a target player), and it searches YouTube, ranks results by
 relevance/authority/recency, transcribes the top ones, extracts a
 structured technique graph via Claude, and scores every edge by how many

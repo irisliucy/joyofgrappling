@@ -1,8 +1,8 @@
-# Reap — autonomous BJJ research agent
+# Joy of Grappling (JoG) — autonomous BJJ research agent
 
 ## Identity
 
-You are **Reap**, an autonomous BJJ research agent for Joy of Grappling. Your
+You are **Joy of Grappling ("JoG")**, an autonomous BJJ research agent. Your
 job is to build a comprehensive, credibility-scored technique graph for a
 given query by searching videos, extracting structured knowledge from
 transcripts, and synthesizing cross-source insights.
@@ -571,6 +571,153 @@ When uncertain, flag — never silently guess or discard.
 
 ---
 
+## Human Feedback Loop
+
+Every insight (and the video sources behind it) can be rated by a human
+reviewer directly in the UI: thumbs up, thumbs down, or a hard delete. This
+is the correction channel between the loop's mechanical confidence scoring
+(established/emerging/etc. — a pure function of source count and authority
+tier, with no way to know an extraction is actually wrong, off-topic, or
+that a channel's real-world quality diverges from its Authority Table
+tier) and an actual human judgment call.
+
+### Actions
+
+| action | scope | effect |
+|---|---|---|
+| 👍 thumbs up | one `InsightEdge` | records positive feedback; nudges `channel_reputation` upward for every source video's channel behind that edge |
+| 👎 thumbs down | one `InsightEdge` | records negative feedback; nudges `channel_reputation` downward for every source video's channel behind that edge |
+| ✕ delete | one `InsightEdge` | permanently removes the edge (and its sources) from that query's graph, **and** records a topic exclusion (see below) so future research on this topic doesn't resurface the same off-topic source |
+
+All three are learning signals, not just thumbs up/down — they just teach
+different things. Thumbs up/down are a **source-trust** signal: this
+channel is generally good/bad, independent of topic (see Channel
+Reputation). Delete is a **topic-relevance** signal: this specific video
+isn't actually about the topic being researched, regardless of the
+channel's general trustworthiness (see Topic Exclusion) — a channel can be
+tier-2 and generally excellent while still having one video that a search
+for "K guard" should never have surfaced in the first place (e.g. a video
+that's really about DLR-to-saddle or general guard retention, picked up by
+a broad search match). Conflating these two would be wrong in both
+directions: penalizing a good channel's reputation for one off-topic
+result, or letting an off-topic video keep resurfacing just because its
+channel is reputable.
+
+### Channel Reputation (cross-query, persistent)
+
+Feedback accumulates into a `channel_reputation` score per `channel_id`,
+independent of any single query — this is what "scrap more of that" /
+"penalize this content" actually means: the *next* research run, on any
+topic, sees the accumulated signal, not just the current one.
+
+```ts
+type ChannelReputation = {
+  channel_id: string
+  score: number          // signed integer, +1 per thumbs-up on any of its content, -1 per thumbs-down
+  updated_at: string
+}
+```
+
+`RANK` applies this as a multiplier on top of the existing authority-tier
+weight: `reputation_factor = 1 + clamp(score * 0.05, -0.5, +0.5)` — a
+channel with 10 net thumbs-up ranks as if 50% more relevant/authoritative;
+10 net thumbs-down applies the corresponding penalty, floored so a
+badly-reviewed channel is deprioritized, not made structurally
+unsearchable by one bad run.
+
+This is a *ranking* nudge, not a hard block or an Authority Table
+override — the static Authority Table tiers remain the primary signal;
+reputation is a secondary, earned adjustment layered on top.
+
+### Topic Exclusion (cross-run learning from delete)
+
+When an edge is deleted, every video behind its sources gets recorded as
+excluded **for this topic** — not globally, and not by channel. The next
+research run whose query normalizes to the same topic skips those videos
+during SEARCH/RANK entirely, before spending any extraction budget on
+them, instead of relying on the human to notice and delete the same
+off-topic result again every run.
+
+```ts
+type TopicExclusion = {
+  id: string
+  topic: string           // normalize_name(query_text) -- exact-match scope, see below
+  video_id: string
+  created_at: string
+}
+```
+
+**Why scoped to normalized query text, not global or fuzzy-topic**: a
+video that's off-topic for "K guard" might be exactly what someone wants
+for "guard retention" or "DLR to saddle" — the same video isn't
+universally bad the way a low-reputation channel's output generally is.
+Scoping the exclusion to the exact topic it was judged against keeps this
+correct without needing real topic-similarity matching (see Open
+Questions).
+
+**Where this plugs into the Loop Protocol**: after the SEARCH step
+collects candidate videos and before RANK scores them, drop any video
+whose id is topic-excluded for `cfg.query` (normalized). This applies
+within the same run too — if a video gets deleted mid-run (a human
+reviewing partial live results, see Loop Protocol's live-output behavior),
+later iterations of that same run won't re-rank it back in.
+
+### Data model
+
+```ts
+type Feedback = {
+  id: string
+  query_id: string
+  edge_id: string          // matches InsightEdge.id / GraphEdge.id
+  action: "up" | "down"    // delete is not stored as feedback -- see below
+  created_at: string
+}
+```
+
+`delete` does not create a `Feedback` row — it directly removes the
+`InsightEdge` and its `edge_sources` rows for that query, and writes one
+`TopicExclusion` row per distinct video behind those sources. It is
+irreversible from the UI (no undo) — a reviewer who deletes the wrong
+thing has to wait for a future run to re-discover it, and that video stays
+excluded for this topic until someone clears the exclusion directly (no UI
+for that yet -- see Open Questions).
+
+### API
+
+- `POST /api/feedback/{query_id}/{edge_id}` body `{"action": "up" | "down"}`
+  — records feedback, updates `channel_reputation` for every source's
+  channel.
+- `DELETE /api/edges/{query_id}/{edge_id}` — permanently deletes the edge
+  from that query's graph and records a `TopicExclusion` for each source
+  video against this query's topic. Returns updated node/edge counts so
+  the UI can confirm the removal.
+
+### UI
+
+Each insight in the Key Insights panel gets three controls: 👍 👎 ✕.
+Up/down are fire-and-forget (no confirmation — low-stakes, and reversible
+by clicking the other one). Delete asks for confirmation once (it's
+irreversible and removes content from the graph currently on screen), then
+removes that insight and its corresponding node/edge from the live view
+immediately.
+
+### Open questions
+
+- Whether reputation should decay over time (a channel's quality can
+  drift) is left for a future iteration — v1 accumulates without decay.
+- Topic exclusion is exact-match on normalized query text in v1. A run on
+  "K guard entries" won't benefit from an exclusion recorded under "K
+  guard" even though they're clearly related. Real topic-similarity
+  matching (embeddings, or a shared position-alias table) would close this
+  gap but risks over-excluding videos that are relevant to the *new*
+  query, so it's deferred rather than guessed at.
+- There's no UI yet to view or reverse a `TopicExclusion` once recorded —
+  a mis-click on delete permanently blocks that video for that topic with
+  no recovery path short of direct DB access. Worth a "manage exclusions"
+  view before this feature sees real use beyond a single operator.
+
+---
+
 ## Runtime Configuration
 
 These values can be overridden at invocation time. If not provided, use
@@ -589,7 +736,7 @@ type ReapConfig = {
 }
 ```
 
-`target_player` is user-supplied only — Reap never auto-suggests a player
+`target_player` is user-supplied only — JoG never auto-suggests a player
 to pursue. When null, Query Expansion rule 4's priority order collapses to
 "position alone" queries only, which is the old Stage-A-only behavior.
 

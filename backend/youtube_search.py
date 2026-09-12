@@ -1,4 +1,4 @@
-"""search(): YouTube implementation of the Reap `search` tool.
+"""search(): YouTube implementation of the JoG `search` tool.
 
 Only "youtube" is implemented in v1 (see programs.md scope decision).
 Other sources are stubbed to raise SourceUnavailable so the loop can log
