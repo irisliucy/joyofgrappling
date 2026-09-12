@@ -1,8 +1,11 @@
 import json
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import config, export_static, loop, store
 from .schemas import ReapConfig
@@ -89,6 +92,18 @@ def get_debug_logs(query_id: str):
         "logs": [dict(r) for r in rows],
         "videos": [dict(v) for v in videos],
     }
+
+
+_ERROR_PAGE = (config.ROOT_DIR / "frontend" / "error.html").read_text()
+
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_404_handler(request: Request, exc: StarletteHTTPException):
+    # Page 404s get the fun BJJ-themed page; /api/ 404s stay JSON so the
+    # frontend's own error handling (which expects a JSON body) still works.
+    if exc.status_code == 404 and not request.url.path.startswith("/api/"):
+        return HTMLResponse(content=_ERROR_PAGE, status_code=404)
+    return await http_exception_handler(request, exc)
 
 
 # Serves frontend/ at the site root, same-origin with the /api routes above

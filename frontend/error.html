@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>404 — Armbar'd</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  .error-page {
+    max-width: 560px;
+    margin: 80px auto;
+    text-align: center;
+  }
+  .error-code {
+    font-size: 96px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .error-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .error-joke {
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.6;
+    margin-bottom: 28px;
+  }
+  .error-home {
+    display: inline-block;
+    padding: 10px 22px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <main class="error-page">
+    <div class="error-code">404</div>
+    <div class="error-title">Tapped. This page isn't here.</div>
+    <p class="error-joke" id="joke">
+      You went for the armbar, overextended, and now the page is gone.
+      Classic white belt mistake.
+    </p>
+    <a class="error-home" href="/">← Reset to neutral guard</a>
+  </main>
+
+  <script>
+    const jokes = [
+      "You went for the armbar, overextended, and now the page is gone. Classic white belt mistake.",
+      "This URL got triangled. It tapped before we could reach it.",
+      "404: swept, mounted, and submitted before it even loaded.",
+      "This page pulled guard, got passed, and never recovered.",
+      "Somebody left an arm in — the page escaped and ran.",
+      "This route got kimura'd into another dimension.",
+      "You shot for a takedown on a URL that wasn't there. Sprawled and rolled.",
+    ];
+    document.getElementById("joke").textContent = jokes[Math.floor(Math.random() * jokes.length)];
+  </script>
+</body>
+</html>
